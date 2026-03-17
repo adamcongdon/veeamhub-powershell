@@ -11,6 +11,10 @@
     then uses VMware PowerCLI to issue guest shutdown (Shutdown-VMGuest) for each
     powered-on VM and waits for power-off confirmation before exiting.
 
+    When connecting to auto-discovered vCenter servers (via Veeam), Windows SSO is used.
+    If SSO is not available in your environment, pass -vCenterServer and -vCenterCredential
+    explicitly instead.
+
     If VMware Tools is not installed or not running on a VM, graceful shutdown is
     impossible. Use -ForceShutdown to hard-power-off those VMs, or they will be
     skipped with a warning (job will still proceed).
@@ -172,8 +176,7 @@ if ($vCenterServer) {
     }
     foreach ($vc in $vbrVCServers) {
         try {
-            $vcCreds = $vc.GetCredentials()
-            $conn = Connect-VIServer -Server $vc.Name -User $vcCreds.UserName -Password $vcCreds.Password -Force -ErrorAction Stop
+            $conn = Connect-VIServer -Server $vc.Name -Force -ErrorAction Stop
             $connectedVCs += $conn
             Write-Log "Connected to vCenter: $($vc.Name)"
         } catch {
