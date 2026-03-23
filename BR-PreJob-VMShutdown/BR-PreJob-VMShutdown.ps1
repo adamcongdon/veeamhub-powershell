@@ -11,9 +11,15 @@
     then uses VMware PowerCLI to issue guest shutdown (Shutdown-VMGuest) for each
     powered-on VM and waits for power-off confirmation before exiting.
 
-    When connecting to auto-discovered vCenter servers (via Veeam), Windows SSO is used.
-    If SSO is not available in your environment, pass -vCenterServer and -vCenterCredential
-    explicitly instead.
+    When connecting to auto-discovered vCenter servers (via Veeam), the script looks for
+    exported PSCredential XML files in a "creds" subfolder next to the script, named
+    <vCenterHostname>.xml (e.g. creds\vcsa.lab.local.xml). Create these once per vCenter:
+
+        Get-Credential | Export-Clixml "C:\Scripts\BR-PreJob-VMShutdown\creds\vcsa.lab.local.xml"
+
+    Run as the same user account that executes the backup job (DPAPI-encrypted, user+machine bound).
+    If no matching credential file is found, the script falls back to Windows SSO.
+    You may also pass -vCenterServer and -vCenterCredential explicitly instead.
 
     If VMware Tools is not installed or not running on a VM, graceful shutdown is
     impossible. Use -ForceShutdown to hard-power-off those VMs, or they will be
@@ -174,9 +180,18 @@ if ($vCenterServer) {
         Disconnect-VBRServer -ErrorAction SilentlyContinue
         exit 1
     }
+    $credsDir = Join-Path $PSScriptRoot "creds"
     foreach ($vc in $vbrVCServers) {
         try {
-            $conn = Connect-VIServer -Server $vc.Name -Force -ErrorAction Stop
+            $credFile = Join-Path $credsDir "$($vc.Name).xml"
+            if (Test-Path $credFile) {
+                $psCred = Import-Clixml -Path $credFile
+                Write-Log "Using stored credential ($($psCred.UserName)) from '$credFile'"
+                $conn = Connect-VIServer -Server $vc.Name -Credential $psCred -Force -ErrorAction Stop
+            } else {
+                Write-Log "No credential file found at '$credFile' - falling back to Windows SSO"
+                $conn = Connect-VIServer -Server $vc.Name -Force -ErrorAction Stop
+            }
             $connectedVCs += $conn
             Write-Log "Connected to vCenter: $($vc.Name)"
         } catch {
@@ -222,7 +237,7 @@ foreach ($obj in $jobObjects) {
             }
         }
 
-        "Folder" {
+        { $_ -in "Folder", "Directory" } {
             $folder = Get-Folder -Name $objName -ErrorAction SilentlyContinue
             if ($folder) {
                 $vms = Get-VM -Location $folder -ErrorAction SilentlyContinue
